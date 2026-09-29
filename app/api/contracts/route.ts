@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ASSETS, type AssetSymbol } from "@/lib/assets";
+import type { AssetSymbol } from "@/lib/assets";
 
 export const runtime = "nodejs";
 type Contract = {
@@ -32,10 +32,10 @@ async function responseJson(url: string, init?: RequestInit) {
 
 export async function GET(request: NextRequest) {
   const symbol = request.nextUrl.searchParams.get("asset");
-  const asset = ASSETS.find((item) => item.symbol === symbol);
-  if (!asset)
+  if (!symbol || !/^[A-Z0-9.-]{1,12}$/.test(symbol))
     return NextResponse.json({ error: "Unsupported asset" }, { status: 400 });
-  const cached = cache.get(asset.symbol);
+  const asset = { symbol };
+  const cached = cache.get(symbol);
   if (cached && cached.until > Date.now())
     return NextResponse.json({ contracts: cached.contracts });
   const contracts: Contract[] = names.map((name) => ({

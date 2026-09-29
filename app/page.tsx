@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ASSETS, type AssetSymbol } from "@/lib/assets";
+import { AssetIcon, AssetPicker } from "@/components/AssetPicker";
+import type { CatalogAsset } from "@/lib/market.mjs";
 import { simulate } from "@/lib/math.mjs";
 
 type Side = "long" | "short";
@@ -11,6 +13,7 @@ type Quote = {
   source: string;
   asOf: string;
   change24h: number | null;
+  snapshot?: boolean;
 };
 type Contract = {
   name: string;
@@ -45,8 +48,16 @@ const signedUsd = (value: number) =>
   `${value >= 0 ? "+" : "−"}${usd(Math.abs(value), 2)}`;
 const signedPct = (value: number) =>
   `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(2)}%`;
-const fmtPrice = (value: number) =>
-  usd(value, value < 1 ? 4 : value < 100 ? 2 : 0);
+const fmtPrice = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return "—";
+  const digits =
+    value >= 100
+      ? 0
+      : value >= 1
+        ? 2
+        : Math.min(10, Math.max(4, 2 - Math.floor(Math.log10(value))));
+  return usd(value, digits);
+};
 const parseNumber = (value: string) =>
   Number(value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"));
 
@@ -182,22 +193,37 @@ function Chart({
   const low = Math.max(0.00000001, entry * (1 - spread));
   const high = entry * (1 + spread);
   const x = (price: number) => 46 + ((price - low) / (high - low)) * 688;
-  const points = Array.from({ length: 141 }, (_, i) => {
-    const price = low + ((high - low) * i) / 140;
-    const value =
-      simulate({
-        entry,
-        margin,
-        leverage,
-        side,
-        exit: price,
-        mode,
-        extraCollateral,
-        maintenanceRate,
-        feeRate,
-      })?.netPnl ?? 0;
-    return { price, value };
-  });
+  const points = useMemo(
+    () =>
+      Array.from({ length: 141 }, (_, i) => {
+        const price = low + ((high - low) * i) / 140;
+        const value =
+          simulate({
+            entry,
+            margin,
+            leverage,
+            side,
+            exit: price,
+            mode,
+            extraCollateral,
+            maintenanceRate,
+            feeRate,
+          })?.netPnl ?? 0;
+        return { price, value };
+      }),
+    [
+      low,
+      high,
+      entry,
+      margin,
+      leverage,
+      side,
+      mode,
+      extraCollateral,
+      maintenanceRate,
+      feeRate,
+    ],
+  );
   const bound = Math.max(
     margin + extraCollateral,
     ...points.map((point) => Math.abs(point.value)),
@@ -223,6 +249,11 @@ function Chart({
     feeRate,
   });
   const position = Math.min(734, Math.max(46, x(shown)));
+  const sliderPct = ((exit - low) / (high - low)) * 100;
+  const entryPct = ((entry - low) / (high - low)) * 100;
+  const liquidationPct = liquidation
+    ? ((liquidation - low) / (high - low)) * 100
+    : null;
   return (
     <Card className="chart-card">
       <div className="section-head">
@@ -375,16 +406,72 @@ function Chart({
               </strong>
             </span>
           </div>
-          <input
-            className="price-slider"
-            aria-label="Test exit price"
-            type="range"
-            min={low}
-            max={high}
-            step={(high - low) / 1000}
-            value={Math.min(high, Math.max(low, exit))}
-            onChange={(event) => onExit(Number(event.target.value))}
-          />
+          <div className="price-path">
+            <div className="price-path-head">
+              <strong>Drag the price path</strong>
+              <span>Move the handle to preview the outcome</span>
+            </div>
+            <div className="price-path-track">
+              <div className="price-path-line" />
+              <span
+                className="price-path-entry"
+                style={{ left: `${entryPct}%` }}
+              >
+                <i />
+                ENTRY
+              </span>
+              {liquidationPct !== null &&
+                liquidationPct >= 0 &&
+                liquidationPct <= 100 && (
+                  <span
+                    className="price-path-liquidation"
+                    style={{ left: `${liquidationPct}%` }}
+                  >
+                    <i />
+                    LIQUIDATION
+                  </span>
+                )}
+              <span
+                className="price-path-preview"
+                style={{ left: `${Math.min(100, Math.max(0, sliderPct))}%` }}
+              >
+                <i />
+                PREVIEW
+              </span>
+              <input
+                className="price-slider"
+                aria-label="Drag preview price on liquidation path"
+                type="range"
+                min={low}
+                max={high}
+                step={(high - low) / 10000}
+                value={Math.min(high, Math.max(low, exit))}
+                onChange={(event) => onExit(Number(event.target.value))}
+              />
+            </div>
+            <div className="price-path-values">
+              <span>
+                EST. LIQUIDATION{" "}
+                <strong className="negative">
+                  {liquidation ? `~${fmtPrice(liquidation)}` : "Unavailable"}
+                </strong>
+              </span>
+              <span>
+                ENTRY <strong>{fmtPrice(entry)}</strong>
+              </span>
+              <span>
+                PREVIEW <strong>{fmtPrice(exit)}</strong>
+              </span>
+            </div>
+            {result?.reachedLiquidation && (
+              <p className="price-path-warning">
+                Estimated liquidation triggers near{" "}
+                {liquidation ? fmtPrice(liquidation) : "an unavailable level"}{" "}
+                before the preview price. Simulated loss:{" "}
+                {usd(result.collateral, 2)}. Actual execution may differ.
+              </p>
+            )}
+          </div>
         </>
       ) : (
         <div className="empty-chart">
@@ -479,6 +566,9 @@ export default function Home() {
   const [maintenancePct, setMaintenancePct] = useState(0.5);
   const [feePct, setFeePct] = useState(0.05);
   const [quotes, setQuotes] = useState<Partial<Record<AssetSymbol, Quote>>>({});
+  const [catalog, setCatalog] = useState<CatalogAsset[]>([]);
+  const [catalogSource, setCatalogSource] = useState("");
+  const [catalogStale, setCatalogStale] = useState(false);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [priceState, setPriceState] = useState<
     "loading" | "live" | "unavailable"
@@ -488,28 +578,127 @@ export default function Home() {
   const [toast, setToast] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [exchange, setExchange] = useState("All");
-  const selected = ASSETS.find((item) => item.symbol === asset)!;
   const quote = quotes[asset];
+  const fallbackCatalog = useMemo<CatalogAsset[]>(
+    () =>
+      ASSETS.map((item) => ({
+        id: item.id,
+        symbol: item.symbol,
+        name: item.name,
+        rank: 0,
+        image: null,
+        color: item.color,
+        price: 0,
+        change24h: null,
+        asOf: "",
+        source: "unavailable",
+      })),
+    [],
+  );
+  const marketAssets = catalog.length ? catalog : fallbackCatalog;
+  const selected = useMemo<CatalogAsset>(() => {
+    const base = marketAssets.find((item) => item.symbol === asset) ?? {
+      id: asset,
+      symbol: asset,
+      name: asset,
+      rank: 0,
+      image: null,
+      color: "#294b43",
+      price: 0,
+      change24h: null,
+      asOf: "",
+      source: "unavailable",
+    };
+    return quote
+      ? {
+          ...base,
+          price: quote.price,
+          asOf: quote.asOf,
+          source: quote.source,
+          change24h: quote.change24h ?? base.change24h,
+        }
+      : base;
+  }, [marketAssets, asset, quote]);
 
-  const refresh = useCallback(async () => {
+  const refreshCatalog = useCallback(async () => {
     try {
-      const response = await fetch("/api/prices", { cache: "no-store" });
+      const response = await fetch("/api/assets");
       const data = (await response.json()) as {
-        prices?: Partial<Record<AssetSymbol, Quote>>;
+        assets?: CatalogAsset[];
+        source?: string;
+        stale?: boolean;
       };
-      if (!response.ok || !data.prices) throw new Error("No quote");
-      setQuotes(data.prices);
-      setPriceState(Object.keys(data.prices).length ? "live" : "unavailable");
+      if (!response.ok || !data.assets?.length)
+        throw new Error("No market catalog");
+      setCatalog(data.assets);
+      setCatalogSource(data.source ?? "Market API");
+      setCatalogStale(Boolean(data.stale));
+      setQuotes((current) =>
+        Object.fromEntries(
+          data.assets!.map((item) => [
+            item.symbol,
+            current[item.symbol] && !current[item.symbol]?.snapshot
+              ? current[item.symbol]
+              : {
+                  price: item.price,
+                  source: item.source,
+                  asOf: item.asOf,
+                  change24h: item.change24h,
+                  snapshot: true,
+                },
+          ]),
+        ),
+      );
+      setPriceState("live");
     } catch {
-      setQuotes({});
+      setCatalogStale(true);
+      try {
+        const response = await fetch("/api/prices");
+        const data = (await response.json()) as {
+          prices?: Record<string, Quote>;
+        };
+        if (response.ok && data.prices) {
+          setQuotes((current) => ({ ...current, ...data.prices }));
+          setPriceState("live");
+          return;
+        }
+      } catch {
+        /* Manual entry remains possible. */
+      }
       setPriceState("unavailable");
     }
   }, []);
   useEffect(() => {
-    refresh();
-    const timer = setInterval(refresh, 30_000);
+    refreshCatalog();
+    const timer = setInterval(refreshCatalog, 5 * 60_000);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refreshCatalog]);
+  useEffect(() => {
+    if (!ASSETS.some((item) => item.symbol === asset)) return;
+    let active = true;
+    const refreshSelected = async () => {
+      try {
+        const response = await fetch(
+          `/api/quote?symbol=${encodeURIComponent(asset)}`,
+        );
+        if (!response.ok) return;
+        const fresh = (await response.json()) as Quote;
+        if (active && Number.isFinite(fresh.price) && fresh.price > 0)
+          setQuotes((current) => ({
+            ...current,
+            [asset]: { ...fresh, snapshot: false },
+          }));
+      } catch {
+        /* Retain the dated catalog snapshot. */
+      }
+    };
+    refreshSelected();
+    const timer = setInterval(refreshSelected, 30_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [asset]);
   useEffect(() => {
     let active = true;
     setContracts([]);
@@ -527,7 +716,7 @@ export default function Home() {
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     const a = query.get("asset");
-    if (ASSETS.some((item) => item.symbol === a)) setAsset(a as AssetSymbol);
+    if (a && a.length <= 32 && !/[<>]/.test(a)) setAsset(a);
     const s = query.get("side");
     if (s === "long" || s === "short") setSide(s);
     const m = query.get("mode");
@@ -622,18 +811,34 @@ export default function Home() {
       feePct,
     ],
   );
-  const scenarios = [-10, -5, -3, -1, 0, 1, 3, 5, 10].map((change) => ({
-    change,
-    price: entry * (1 + change / 100),
-    result: simulate({ ...input, exit: entry * (1 + change / 100) }),
-  }));
-  const updateAsset = (symbol: AssetSymbol) => {
-    setAsset(symbol);
-    setManualEntry(false);
-    const price = quotes[symbol]?.price ?? 0;
-    setEntry(price);
-    setExit(price ? price * 1.03 : 0);
-  };
+  const scenarios = useMemo(
+    () =>
+      [-10, -5, -3, -1, 0, 1, 3, 5, 10].map((change) => ({
+        change,
+        price: entry * (1 + change / 100),
+        result: simulate({ ...input, exit: entry * (1 + change / 100) }),
+      })),
+    [
+      entry,
+      margin,
+      leverage,
+      side,
+      mode,
+      extraCollateral,
+      maintenancePct,
+      feePct,
+    ],
+  );
+  const updateAsset = useCallback(
+    (symbol: AssetSymbol) => {
+      setAsset(symbol);
+      setManualEntry(false);
+      const price = quotes[symbol]?.price ?? 0;
+      setEntry(price);
+      setExit(price ? price * 1.03 : 0);
+    },
+    [quotes],
+  );
   const showToast = (message: string) => setToast(message);
   const save = () => {
     const next: Saved[] = [
@@ -770,7 +975,11 @@ export default function Home() {
           <span className={`live-pill ${priceState}`}>
             <span className="status-dot" />
             {priceState === "live"
-              ? "MARKET FEED LIVE"
+              ? catalogStale
+                ? "MARKET DATA DELAYED"
+                : quote?.snapshot
+                  ? "MARKET SNAPSHOT"
+                  : "MARKET FEED LIVE"
               : priceState === "loading"
                 ? "CONNECTING"
                 : "PRICE UNAVAILABLE"}
@@ -814,31 +1023,14 @@ export default function Home() {
               </div>
               <span className="section-aside">ALL CALCULATIONS ON DEVICE</span>
             </div>
-            <label className="field">
-              <span className="field-label">ASSET</span>
-              <span className="select-wrap">
-                <span
-                  className="asset-dot"
-                  style={{ background: selected.color }}
-                >
-                  {asset.slice(0, 1)}
-                </span>
-                <select
-                  aria-label="Asset"
-                  value={asset}
-                  onChange={(event) =>
-                    updateAsset(event.target.value as AssetSymbol)
-                  }
-                >
-                  {ASSETS.map((item) => (
-                    <option key={item.symbol} value={item.symbol}>
-                      {item.symbol} — {item.name}
-                    </option>
-                  ))}
-                </select>
-                <span className="select-chevron">⌄</span>
-              </span>
-            </label>
+            <AssetPicker
+              assets={marketAssets}
+              selected={selected}
+              onSelect={updateAsset}
+              loading={priceState === "loading"}
+              stale={catalogStale}
+              source={catalogSource}
+            />
             <div className="field">
               <span className="field-label">DIRECTION</span>
               <div className="segmented">
@@ -877,10 +1069,10 @@ export default function Home() {
                 setEntry(value);
                 setManualEntry(true);
               }}
-              decimals={asset === "BTC" || asset === "ETH" ? 2 : 6}
+              decimals={12}
               hint={
                 quote
-                  ? `Live ${asset} ${fmtPrice(quote.price)} · ${quote.source} · ${new Date(quote.asOf).toLocaleTimeString()}`
+                  ? `${quote.snapshot ? "Market snapshot" : "Live quote"} ${asset} ${fmtPrice(quote.price)} · ${quote.source} · ${new Date(quote.asOf).toLocaleTimeString()}`
                   : priceState === "loading"
                     ? "Checking live market sources…"
                     : "Live price unavailable. Enter a price manually."
@@ -989,12 +1181,7 @@ export default function Home() {
             <Card className="summary-card">
               <div className="summary-top">
                 <div className="summary-asset">
-                  <span
-                    className="summary-token"
-                    style={{ background: selected.color }}
-                  >
-                    {asset.slice(0, 1)}
-                  </span>
+                  <AssetIcon asset={selected} size={47} />
                   <div>
                     <span className="eyebrow">02 / POSITION SUMMARY</span>
                     <h2>
@@ -1111,7 +1298,7 @@ export default function Home() {
               label="EXIT PRICE"
               value={exit}
               onChange={setExit}
-              decimals={asset === "BTC" || asset === "ETH" ? 2 : 6}
+              decimals={12}
             />
             <div className="preset-row move-preset">
               {[-10, -5, -3, -1, 1, 3, 5, 10].map((change) => (
@@ -1248,13 +1435,13 @@ export default function Home() {
               },
               {
                 name: "OKX",
-                url: "https://www.okx.com/trade-swap/btc-usdt-swap",
-                note: "Perpetual contract details",
+                url: "https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments",
+                note: "Perpetual contract rules",
               },
               {
                 name: "Bitget",
-                url: "https://www.bitget.com/futures/usdt/BTCUSDT",
-                note: "Futures contract details",
+                url: "https://www.bitget.com/api-doc/contract/market/Get-All-Symbols-Contracts",
+                note: "Futures contract rules",
               },
               {
                 name: "Hyperliquid",
