@@ -21,6 +21,7 @@ type Contract = {
   contract: string;
   verifiedAt: string | null;
   source: string;
+  status: "verified" | "not_listed" | "unavailable";
 };
 type Saved = {
   id: number;
@@ -36,7 +37,68 @@ type Saved = {
   feeRate: number;
 };
 const storageKey = "leverage-lab-simulations-v1";
+const EXCHANGES = [
+  {
+    name: "Binance",
+    logo: "/exchanges/binance.png",
+    url: "https://www.binance.com/en/futures/trading-rules/perpetual/leverage-margin",
+    note: "Futures trading rules",
+  },
+  {
+    name: "Bybit",
+    logo: "/exchanges/bybit.png",
+    url: "https://www.bybit.com/en/help-center/article/Risk-Limit-Perpetual-and-Futures",
+    note: "Risk limit and tiers",
+  },
+  {
+    name: "OKX",
+    logo: "/exchanges/okx.png",
+    url: "https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments",
+    note: "Perpetual contract rules",
+  },
+  {
+    name: "Bitget",
+    logo: "/exchanges/bitget.png",
+    url: "https://www.bitget.com/api-doc/contract/market/Get-All-Symbols-Contracts",
+    note: "Futures contract rules",
+  },
+  {
+    name: "Hyperliquid",
+    logo: "/exchanges/hyperliquid.png",
+    url: "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/contract-specifications",
+    note: "Contract specifications",
+  },
+  {
+    name: "Kraken",
+    logo: "/exchanges/kraken.png",
+    url: "https://support.kraken.com/articles/360022632452-derivatives-contract-specifications",
+    note: "Derivatives specifications",
+  },
+  {
+    name: "Coinbase",
+    logo: "/exchanges/coinbase.png",
+    url: "https://www.coinbase.com/learn/advanced-trading/understanding-derivatives",
+    note: "Derivatives rules",
+  },
+  {
+    name: "MEXC",
+    logo: "/exchanges/mexc.png",
+    url: "https://mexcdevelop.github.io/apidocs/contract_v1_en/#get-the-contract-information",
+    note: "Perpetual contract rules",
+  },
+] as const;
 const nf = new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 });
+const fmtQty = (value: number) =>
+  new Intl.NumberFormat(
+    "en-US",
+    value >= 1_000_000
+      ? { notation: "compact", maximumFractionDigits: 2 }
+      : value >= 1_000
+        ? { maximumFractionDigits: 2 }
+        : value >= 1
+          ? { maximumFractionDigits: 4 }
+          : { maximumSignificantDigits: 6, maximumFractionDigits: 12 },
+  ).format(value);
 const usd = (value: number, digits = 0) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -178,20 +240,25 @@ function Chart({
   feeRate: number;
   onExit: (value: number) => void;
 }) {
-  const [hover, setHover] = useState<number | null>(null);
-  const spread =
+  const liquidationMovePct = liquidation
+    ? ((liquidation - entry) / entry) * 100
+    : null;
+  const previewMovePct = entry > 0 ? ((exit - entry) / entry) * 100 : 0;
+  const spreadPct =
     entry > 0
       ? Math.min(
-          0.75,
+          75,
           Math.max(
-            0.04,
-            Math.abs(exit / entry - 1) * 1.25,
-            liquidation ? Math.abs(liquidation / entry - 1) * 2.3 : 0,
+            2,
+            Math.abs(previewMovePct) * 1.25,
+            liquidationMovePct !== null
+              ? Math.abs(liquidationMovePct) * 2.3
+              : 0,
           ),
         )
-      : 0.05;
-  const low = Math.max(0.00000001, entry * (1 - spread));
-  const high = entry * (1 + spread);
+      : 5;
+  const low = entry * (1 - spreadPct / 100);
+  const high = entry * (1 + spreadPct / 100);
   const x = (price: number) => 46 + ((price - low) / (high - low)) * 688;
   const points = useMemo(
     () =>
@@ -236,31 +303,41 @@ function Chart({
         `${i ? "L" : "M"}${x(point.price).toFixed(2)} ${y(point.value).toFixed(2)}`,
     )
     .join(" ");
-  const shown = hover ?? exit;
   const result = simulate({
     entry,
     margin,
     leverage,
     side,
-    exit: shown,
+    exit,
     mode,
     extraCollateral,
     maintenanceRate,
     feeRate,
   });
-  const position = Math.min(734, Math.max(46, x(shown)));
-  const sliderPct = ((exit - low) / (high - low)) * 100;
-  const entryPct = ((entry - low) / (high - low)) * 100;
-  const liquidationPct = liquidation
-    ? ((liquidation - low) / (high - low)) * 100
-    : null;
+  const position = Math.min(734, Math.max(46, x(exit)));
+  const sliderPct = 50 + (previewMovePct / spreadPct) * 50;
+  const liquidationPct =
+    liquidationMovePct !== null
+      ? 50 + (liquidationMovePct / spreadPct) * 50
+      : null;
+  const moveFromPointer = (event: React.PointerEvent<SVGRectElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relative = Math.min(
+      1,
+      Math.max(0, (event.clientX - rect.left) / rect.width),
+    );
+    onExit(low + relative * (high - low));
+  };
   return (
     <Card className="chart-card">
       <div className="section-head">
         <div>
           <span className="eyebrow">INTERACTIVE RISK MAP</span>
           <h2>Where the trade breaks</h2>
-          <p>Move across the chart or drag the price slider to test an exit.</p>
+          <p>
+            Drag the chart or price path to see the move that reaches
+            liquidation.
+          </p>
         </div>
         <span className="estimate-tag">ESTIMATE · NOT AN EXCHANGE QUOTE</span>
       </div>
@@ -287,6 +364,18 @@ function Chart({
                 rx="8"
                 fill="#0b1214"
               />
+              {liquidation && liquidation >= low && liquidation <= high && (
+                <rect
+                  x={side === "long" ? 46 : x(liquidation)}
+                  y="25"
+                  width={
+                    side === "long" ? x(liquidation) - 46 : 734 - x(liquidation)
+                  }
+                  height="218"
+                  fill="#a63f4b"
+                  opacity=".13"
+                />
+              )}
               <path
                 d={`M46 ${y(0)}H734`}
                 stroke="#5d7072"
@@ -334,7 +423,7 @@ function Chart({
               />
               <path d={`M${position} 26V244`} stroke="#cde0d8" opacity=".35" />
               <text x="46" y="267" fill="#8d9a9e" fontSize="12">
-                {fmtPrice(low)}
+                {`−${spreadPct.toFixed(2)}%`}
               </text>
               <text
                 x={x(entry)}
@@ -343,7 +432,7 @@ function Chart({
                 fill="#dfeae5"
                 fontSize="12"
               >
-                ENTRY {fmtPrice(entry)}
+                ENTRY 0%
               </text>
               <text
                 x="734"
@@ -352,7 +441,7 @@ function Chart({
                 fill="#8d9a9e"
                 fontSize="12"
               >
-                {fmtPrice(high)}
+                {`+${spreadPct.toFixed(2)}%`}
               </text>
               <rect
                 x="46"
@@ -360,32 +449,23 @@ function Chart({
                 width="688"
                 height="218"
                 fill="transparent"
-                onPointerMove={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const relative = Math.min(
-                    1,
-                    Math.max(0, (event.clientX - rect.left) / rect.width),
-                  );
-                  setHover(low + relative * (high - low));
+                onPointerDown={(event) => {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  moveFromPointer(event);
                 }}
-                onPointerLeave={() => setHover(null)}
-                onClick={(event) => {
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  onExit(
-                    low +
-                      Math.min(
-                        1,
-                        Math.max(0, (event.clientX - rect.left) / rect.width),
-                      ) *
-                        (high - low),
-                  );
+                onPointerMove={(event) => {
+                  if (event.buttons & 1) moveFromPointer(event);
+                }}
+                onPointerUp={(event) => {
+                  if (event.currentTarget.hasPointerCapture(event.pointerId))
+                    event.currentTarget.releasePointerCapture(event.pointerId);
                 }}
               />
             </svg>
           </div>
           <div className="chart-readout">
             <span>
-              TEST PRICE <strong>{fmtPrice(shown)}</strong>
+              PREVIEW PRICE <strong>{fmtPrice(exit)}</strong>
             </span>
             <span>
               NET PNL{" "}
@@ -405,6 +485,12 @@ function Chart({
                 {result ? signedPct(result.roi) : "—"}
               </strong>
             </span>
+            <span>
+              PRICE MOVE{" "}
+              <strong className={previewMovePct < 0 ? "negative" : "positive"}>
+                {signedPct(previewMovePct)}
+              </strong>
+            </span>
           </div>
           <div className="price-path">
             <div className="price-path-head">
@@ -413,10 +499,19 @@ function Chart({
             </div>
             <div className="price-path-track">
               <div className="price-path-line" />
-              <span
-                className="price-path-entry"
-                style={{ left: `${entryPct}%` }}
-              >
+              {liquidationPct !== null &&
+                liquidationPct >= 0 &&
+                liquidationPct <= 100 && (
+                  <div
+                    className="price-path-risk"
+                    style={
+                      side === "long"
+                        ? { left: 0, width: `${liquidationPct}%` }
+                        : { left: `${liquidationPct}%`, right: 0 }
+                    }
+                  />
+                )}
+              <span className="price-path-entry" style={{ left: "50%" }}>
                 <i />
                 ENTRY
               </span>
@@ -440,18 +535,34 @@ function Chart({
               </span>
               <input
                 className="price-slider"
-                aria-label="Drag preview price on liquidation path"
+                aria-label="Preview price move percentage"
+                aria-valuetext={`${signedPct(previewMovePct)} from entry, ${fmtPrice(exit)}`}
                 type="range"
-                min={low}
-                max={high}
-                step={(high - low) / 10000}
-                value={Math.min(high, Math.max(low, exit))}
-                onChange={(event) => onExit(Number(event.target.value))}
+                min={-spreadPct}
+                max={spreadPct}
+                step={0.001}
+                value={Math.min(
+                  spreadPct,
+                  Math.max(-spreadPct, previewMovePct),
+                )}
+                onChange={(event) =>
+                  onExit(entry * (1 + Number(event.target.value) / 100))
+                }
               />
+            </div>
+            <div className="price-path-scale">
+              <span>−{spreadPct.toFixed(2)}%</span>
+              <span>ENTRY 0%</span>
+              <span>+{spreadPct.toFixed(2)}%</span>
             </div>
             <div className="price-path-values">
               <span>
                 EST. LIQUIDATION{" "}
+                <small>
+                  {liquidationMovePct !== null
+                    ? signedPct(liquidationMovePct)
+                    : "No level"}
+                </small>
                 <strong className="negative">
                   {liquidation ? `~${fmtPrice(liquidation)}` : "Unavailable"}
                 </strong>
@@ -460,7 +571,8 @@ function Chart({
                 ENTRY <strong>{fmtPrice(entry)}</strong>
               </span>
               <span>
-                PREVIEW <strong>{fmtPrice(exit)}</strong>
+                PREVIEW <small>{signedPct(previewMovePct)}</small>{" "}
+                <strong>{fmtPrice(exit)}</strong>
               </span>
             </div>
             {result?.reachedLiquidation && (
@@ -570,6 +682,7 @@ export default function Home() {
   const [catalogSource, setCatalogSource] = useState("");
   const [catalogStale, setCatalogStale] = useState(false);
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [contractsLoading, setContractsLoading] = useState(true);
   const [priceState, setPriceState] = useState<
     "loading" | "live" | "unavailable"
   >("loading");
@@ -702,13 +815,17 @@ export default function Home() {
   useEffect(() => {
     let active = true;
     setContracts([]);
+    setContractsLoading(true);
     fetch(`/api/contracts?asset=${asset}`)
       .then((response) => response.json())
       .then((data: { contracts?: Contract[] }) => {
         if (active && Array.isArray(data.contracts))
           setContracts(data.contracts);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (active) setContractsLoading(false);
+      });
     return () => {
       active = false;
     };
@@ -1209,8 +1326,14 @@ export default function Home() {
                 </div>
                 <div>
                   <span>QUANTITY</span>
-                  <strong>
-                    {result ? nf.format(result.quantity) : "—"}{" "}
+                  <strong
+                    title={
+                      result
+                        ? `${nf.format(result.quantity)} ${asset}`
+                        : undefined
+                    }
+                  >
+                    {result ? fmtQty(result.quantity) : "—"}{" "}
                     <small>{asset}</small>
                   </strong>
                 </div>
@@ -1397,106 +1520,105 @@ export default function Home() {
               </p>
             </div>
             <span className="section-aside">
-              {contracts.filter((item) => item.maxLeverage).length} LIVE
-              VERIFIED
+              {contractsLoading
+                ? "CHECKING CONTRACTS"
+                : `${contracts.filter((item) => item.status === "verified").length} OF ${EXCHANGES.length} MAXIMA VERIFIED`}
             </span>
           </div>
           <div className="filter-row">
-            {[
-              "All",
-              "Binance",
-              "Bybit",
-              "OKX",
-              "Bitget",
-              "Hyperliquid",
-              "Kraken",
-              "Coinbase",
-            ].map((name) => (
+            {["All", ...EXCHANGES.map((item) => item.name)].map((name) => (
               <button
                 key={name}
                 className={exchange === name ? "selected" : ""}
                 onClick={() => setExchange(name)}
               >
+                {name !== "All" && (
+                  <img
+                    className="exchange-filter-logo"
+                    src={EXCHANGES.find((item) => item.name === name)?.logo}
+                    alt=""
+                    width="17"
+                    height="17"
+                    loading="lazy"
+                  />
+                )}
                 {name}
               </button>
             ))}
           </div>
           <div className="exchange-grid">
-            {[
-              {
-                name: "Binance",
-                url: "https://www.binance.com/en/futures/trading-rules/perpetual/leverage-margin",
-                note: "Futures trading rules",
-              },
-              {
-                name: "Bybit",
-                url: "https://www.bybit.com/en/help-center/article/Risk-Limit-Perpetual-and-Futures",
-                note: "Risk limit and tiers",
-              },
-              {
-                name: "OKX",
-                url: "https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments",
-                note: "Perpetual contract rules",
-              },
-              {
-                name: "Bitget",
-                url: "https://www.bitget.com/api-doc/contract/market/Get-All-Symbols-Contracts",
-                note: "Futures contract rules",
-              },
-              {
-                name: "Hyperliquid",
-                url: "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/contract-specifications",
-                note: "Contract specifications",
-              },
-              {
-                name: "Kraken",
-                url: "https://support.kraken.com/articles/360022632452-derivatives-contract-specifications",
-                note: "Derivatives specifications",
-              },
-              {
-                name: "Coinbase",
-                url: "https://www.coinbase.com/learn/advanced-trading/understanding-derivatives",
-                note: "Derivatives rules",
-              },
-            ]
-              .filter((item) => exchange === "All" || exchange === item.name)
-              .map((item) => {
-                const contract = contracts.find(
-                  (row) => row.name === item.name,
-                );
-                return (
-                  <div className="exchange-tile" key={item.name}>
+            {EXCHANGES.filter(
+              (item) => exchange === "All" || exchange === item.name,
+            ).map((item) => {
+              const contract = contracts.find((row) => row.name === item.name);
+              const verified =
+                contract?.status === "verified" &&
+                Number.isFinite(contract.maxLeverage);
+              const supported =
+                verified && leverage <= Number(contract?.maxLeverage);
+              return (
+                <div className="exchange-tile" key={item.name}>
+                  <div className="exchange-tile-head">
+                    <img
+                      className="exchange-logo"
+                      src={item.logo}
+                      alt={`${item.name} logo`}
+                      width="36"
+                      height="36"
+                      loading="lazy"
+                    />
                     <div>
                       <strong>{item.name}</strong>
                       <span>{contract?.contract ?? item.note}</span>
                     </div>
-                    <div className="contract-value">
-                      <span>PUBLIC MAX LEVERAGE</span>
-                      <strong>
-                        {contract?.maxLeverage
-                          ? `${contract.maxLeverage}×`
-                          : "Verify on exchange"}
-                      </strong>
-                    </div>
                     <span
-                      className={`verify-badge ${contract?.maxLeverage ? "verified" : ""}`}
+                      className={`exchange-check ${contractsLoading ? "checking" : verified ? "present" : "absent"}`}
+                      aria-label={
+                        contractsLoading
+                          ? "Checking contract"
+                          : verified
+                            ? "Verified public maximum"
+                            : "No verified public maximum"
+                      }
                     >
-                      {contract?.maxLeverage
-                        ? leverage <= contract.maxLeverage
-                          ? `${leverage}× PUBLICLY SUPPORTED`
-                          : `${leverage}× ABOVE PUBLIC MAX`
-                        : "UNVERIFIED"}
+                      {contractsLoading ? "…" : verified ? "✓" : "×"}
                     </span>
-                    <a
-                      href={contract?.source || item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Official source ↗
-                    </a>
                   </div>
-                );
-              })}
+                  <div className="contract-value">
+                    <span>PUBLIC MAX LEVERAGE</span>
+                    <strong>
+                      {contractsLoading
+                        ? "Checking public data…"
+                        : verified
+                          ? `${contract.maxLeverage}×`
+                          : contract?.status === "not_listed"
+                            ? "No active contract"
+                            : "No verified data"}
+                    </strong>
+                  </div>
+                  <span
+                    className={`verify-badge ${contractsLoading ? "checking" : verified ? (supported ? "supported" : "above-max") : "missing"}`}
+                  >
+                    {contractsLoading
+                      ? "CHECKING LIVE DATA"
+                      : verified
+                        ? supported
+                          ? `✓ ${leverage}× WITHIN PUBLIC MAX`
+                          : `× ${leverage}× ABOVE ${contract.maxLeverage}× MAX`
+                        : contract?.status === "not_listed"
+                          ? "× NOT LISTED IN PUBLIC DATA"
+                          : "× PUBLIC MAX UNVERIFIED"}
+                  </span>
+                  <a
+                    href={contract?.source || item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Official data/source ↗
+                  </a>
+                </div>
+              );
+            })}
           </div>
           <p className="fineprint">
             A public maximum is not a guarantee for your account or size. Real

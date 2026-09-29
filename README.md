@@ -17,7 +17,7 @@ Open `http://localhost:3000`. `npm.cmd test` checks the core math; `npm.cmd run 
 
 The six identity-matched assets BTC, ETH, SOL, XRP, DOGE, and ADA receive a fresh selected quote from Coinbase Exchange, then Kraken when available. The remaining assets retain their timestamped catalog price, avoiding ambiguous ticker-only matches across providers. Missing prices remain unavailable; there are no static or invented fallback prices. Selected quotes are cached for 20 seconds.
 
-Public futures contract maxima are checked separately from OKX, Hyperliquid, Bybit, and Bitget. A failed contract request stays **Unverified**. Public maxima do not establish account eligibility or a given position tier.
+Public futures contract maxima are checked separately from OKX, Hyperliquid, Bybit, Bitget, and MEXC. MEXC's public contract catalog is cached for five minutes because its documented endpoint is rate-limited. A verified maximum is shown only for an exact active contract returned by an official exchange API. A successful response with no active contract is labeled **Not listed**; a failed request or unavailable public maximum is labeled **Unverified** with a red X. Binance, Kraken, and Coinbase remain unverified without a public contract maximum; no maximum is guessed. Exchange logos are local copies of the favicons served for each exchange's official domain. Public maxima do not establish account eligibility or a given position tier.
 
 ## Liquidation estimate
 
@@ -25,7 +25,7 @@ The model assumes a linear USD-margined position. Notional is `margin × leverag
 
 The PnL path caps simulated loss at allocated collateral once a target price crosses the estimated liquidation level. The browser stores recent setups locally, and share links encode the inputs in the URL.
 
-Drag the price path handle or use its keyboard-accessible slider to preview a target price. The entry and estimated liquidation levels stay marked as inputs change. Actual exchange liquidation and execution can differ from this simplified estimate.
+Drag the chart or use the keyboard-accessible price-path slider to preview a move from entry in percent. The chart shades the adverse price range beyond the estimated liquidation threshold, and the preview price, PnL, and slider stay synchronized. Actual exchange liquidation and execution can differ from this simplified estimate.
 
 ## API routes
 

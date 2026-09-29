@@ -627,6 +627,10 @@ p {
   display: flex;
   align-items: center;
   gap: 13px;
+  min-width: 0;
+}
+.summary-asset > div {
+  min-width: 0;
 }
 .summary-token {
   width: 47px;
@@ -637,6 +641,7 @@ p {
   font-family: "Space Grotesk", Arial, sans-serif;
   margin: 4px 0 0;
   font-size: 26px;
+  overflow-wrap: anywhere;
 }
 .direction-long,
 .direction-short {
@@ -686,8 +691,12 @@ p {
 }
 .metric-grid strong {
   font-family: "Space Grotesk", Arial, sans-serif;
-  font-size: clamp(16px, 1.8vw, 25px);
-  white-space: nowrap;
+  display: block;
+  min-width: 0;
+  font-size: clamp(15px, 1.55vw, 23px);
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.04em;
 }
 .metric-grid small {
@@ -712,7 +721,8 @@ p {
   display: block;
   font-size: clamp(25px, 2.5vw, 37px);
   letter-spacing: -0.05em;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
 }
 .positive {
   color: var(--mint) !important;
@@ -764,7 +774,7 @@ p {
 }
 .chart-readout {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   border: 1px solid #314244;
   background: #0d1617;
@@ -780,12 +790,15 @@ p {
   font-weight: 700;
   letter-spacing: 0.08em;
   gap: 6px;
+  min-width: 0;
 }
 .chart-readout strong {
   font-family: "Space Grotesk", Arial, sans-serif;
   color: #e9f6ee;
   font-size: 16px;
   letter-spacing: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
 }
 .price-slider {
   margin-bottom: 12px;
@@ -820,7 +833,26 @@ p {
   right: 0;
   height: 5px;
   border-radius: 9px;
-  background: linear-gradient(90deg, #b84a58, #60726a 50%, #25b78b);
+  background: #389b79;
+}
+.price-path-risk {
+  position: absolute;
+  top: 46px;
+  height: 5px;
+  border-radius: 9px;
+  background: #c95463;
+}
+.price-path-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 13px;
+  color: #8ca39e;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.price-path-scale span:nth-child(2) {
+  color: #d7e6df;
 }
 .price-path-entry,
 .price-path-liquidation,
@@ -895,6 +927,11 @@ p {
   font-weight: 700;
   letter-spacing: 0.08em;
 }
+.price-path-values small {
+  color: #9caeaa;
+  font-size: 10px;
+  letter-spacing: 0;
+}
 .price-path-values strong {
   color: #e6f3ec;
   font-size: 13px;
@@ -937,7 +974,9 @@ p {
 .scenario-summary strong {
   font-family: "Space Grotesk", Arial, sans-serif;
   font-size: clamp(17px, 2vw, 26px);
-  white-space: nowrap;
+  display: block;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
 }
 .table-card {
   overflow: hidden;
@@ -976,6 +1015,17 @@ tr.reference-row {
 .filter-row {
   margin-bottom: 20px;
 }
+.filter-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.exchange-filter-logo {
+  width: 17px;
+  height: 17px;
+  object-fit: contain;
+  flex: none;
+}
 .exchange-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -993,6 +1043,55 @@ tr.reference-row {
   display: grid;
   gap: 5px;
 }
+.exchange-tile > .exchange-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.exchange-tile-head > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  flex: 1;
+}
+.exchange-tile-head > div span {
+  overflow-wrap: anywhere;
+}
+.exchange-logo {
+  display: block;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  border-radius: 9px;
+  background: #172224;
+  padding: 4px;
+}
+.exchange-tile .exchange-check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid currentColor;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+.exchange-tile .exchange-check.present {
+  color: #4de0aa;
+  background: #113b2e;
+}
+.exchange-tile .exchange-check.absent {
+  color: #ff7f88;
+  background: #3b2027;
+}
+.exchange-tile .exchange-check.checking {
+  color: #9eada7;
+  background: #24302d;
+}
 .exchange-tile strong {
   font-family: "Space Grotesk", Arial, sans-serif;
 }
@@ -1007,6 +1106,9 @@ tr.reference-row {
   color: #e2bb7e;
   background: #342a1b;
   width: max-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
   padding: 5px 7px;
   border-radius: 4px;
 }
@@ -1314,6 +1416,7 @@ footer > span {
     margin: 0 17px 15px;
   }
   .chart-readout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 5px;
     padding: 10px;
   }
@@ -1393,10 +1496,20 @@ footer > span {
 .contract-value strong {
   font-family: "Space Grotesk", Arial, sans-serif;
   font-size: 22px;
+  overflow-wrap: anywhere;
 }
-.verify-badge.verified {
+.verify-badge.supported {
   color: #57e7b9;
   background: #14392e;
+}
+.verify-badge.above-max,
+.verify-badge.missing {
+  color: #ff9aa2;
+  background: #382126;
+}
+.verify-badge.checking {
+  color: #aebbb6;
+  background: #24302d;
 }
 @media (max-width: 600px) {
   .chart-wrap {
